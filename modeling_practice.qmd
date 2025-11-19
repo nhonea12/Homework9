@@ -1,0 +1,605 @@
+---
+title: "ST 558 Homework 9"
+author: "Nathan Honea"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+The following is a continuation of what we were working on in homework 8. We are still working with the 2018 Seoul bike rental data, trying to fit different models to predict the number of rentals in a day. The below code is the exact same as homework, except other models have been at the end to also consider. Using the first recipe, we will also consider a LASSO model, a regression tree model, a bagged model, and a random forest model, with each model being tuned. We will find the 'best' version of each of these models, and then compare them, along with our best MLR model, to find the best overall model, based on how they perform on our training data.
+
+## Data Reading and EDA
+
+```{r}
+library(tidyverse)
+#install.packages("tidymodels")
+library(tidymodels)
+
+# read in the Seoul Bike Data
+bike_data <- read_csv("SeoulBikeData.csv", locale=locale(encoding="latin1"))
+
+# check for missing values
+colSums(is.na(bike_data))
+```
+
+The above code reads in the data, and then checks to see how many missing observation are in each column of our data. Luckily, there are no missing observations in any of our columns!
+
+```{r}
+# check the column types and column values
+str(bike_data)
+```
+
+The str() function allows us the examine the structure of our data. Here we can see which of our variables are numeric, and which ones are character. We can see the first few observations of each column, so we know whether the values makes sense in context, and we see the number of observations in each column, which is 8760 for every variable in our data set.
+
+```{r}
+# basic summaru stats of numeric variables
+mean(bike_data$`Rented Bike Count`)
+sd(bike_data$`Rented Bike Count`)
+```
+
+The mean number of rented bikes per hour in Seoul in 2018 was 704.6021. The standard deviation of this mean is 644.9975.
+
+```{r}
+mean(bike_data$Hour)
+sd(bike_data$Hour)
+```
+
+The mean of our hour variable is 11.5. The standard deviation is 6.922582. These number are not very useful in context.
+
+```{r}
+mean(bike_data$`Temperature(°C)`)
+sd(bike_data$`Temperature(°C)`)
+```
+
+The mean hourly temperature in Seoul in 2018 was 12.88292°C, with a standard deviation of 11.94483°C.
+
+```{r}
+mean(bike_data$`Humidity(%)`)
+sd(bike_data$`Humidity(%)`)
+```
+
+The mean hourly humidity in Seoul in 2018 was 58.22626%, with a standard deviation of 20.36241%.
+
+```{r}
+mean(bike_data$`Visibility (10m)`)
+sd(bike_data$`Visibility (10m)`)
+```
+
+The mean hourly visibility in Seoul in 2018 was 14368.26 meters, with a standard deviation of 6082.987 meters.
+
+```{r}
+mean(bike_data$`Dew point temperature(°C)`)
+sd(bike_data$`Dew point temperature(°C)`)
+```
+
+The mean hourly dew point temperature in Seoul in 2018 was 4.073813°C, with a standard deviation of 13.06037°C.
+
+```{r}
+mean(bike_data$`Solar Radiation (MJ/m2)`)
+sd(bike_data$`Solar Radiation (MJ/m2)`)
+```
+
+The mean hourly solar radiation level in Seoul in 2018 was 0.5691107 MJ/m2, with a standard deviation of 0.8687462 MJ/m2.
+
+```{r}
+mean(bike_data$`Rainfall(mm)`)
+sd(bike_data$`Rainfall(mm)`)
+```
+
+The mean hourly rainfall in Seoul in 2018 was 0.1486872mm, with a standard deviation of 1.128193mm.
+
+```{r}
+mean(bike_data$`Snowfall (cm)`)
+sd(bike_data$`Snowfall (cm)`)
+```
+
+The mean hourly snowfall in Seoul in 2018 was 0.07506849cm, with a standard deviation of 0.4367462cm.
+
+```{r}
+# check unique levels of categorical variables
+unique(bike_data$Seasons)
+
+unique(bike_data$Holiday)
+
+unique(bike_data$`Functioning Day`)
+
+# convert to Date variable to date type using lubridate package
+bike_data <- bike_data |> 
+  mutate(date = dmy(Date)) |> 
+  select(-Date)
+
+# convert character variables to factors
+bike_data <- bike_data |> 
+  mutate(
+    season = as.factor(Seasons),
+    holiday = as.factor(Holiday),
+    functioning_day = as.factor(`Functioning Day`)
+  ) |> 
+  select(-c(Seasons, Holiday, `Functioning Day`))
+
+# rename column names that need to be fixed
+bike_data |> names()
+
+bike_data <- bike_data |> 
+  rename(
+    "bike_count" = "Rented Bike Count",
+    "hour" = "Hour",
+    "temperature" = "Temperature(°C)",
+    "humidity" = "Humidity(%)",
+    "wind_speed" = "Wind speed (m/s)",
+    "visibility" = "Visibility (10m)",
+    "dew_point_temp" = "Dew point temperature(°C)",
+    "solar_radiation" = "Solar Radiation (MJ/m2)",
+    "rainfall" = "Rainfall(mm)",
+    "snowfall" = "Snowfall (cm)"
+  )
+
+bike_data |> names()
+```
+
+The above code makes the bike rental data easier to work with in several. When the data was read in, Date was included as a character variable, but after using the dmy() function from the lubridate package, the date variable (now lowercase) is of the date data type. 
+After looking at the unique levels of each other character variable, the remaining character variables have been stored as factors, with their names updated to be more compatible with R.
+
+All the numeric variables also had their names updated, so now every variable in our data set has lower, snake-case variable names.
+
+```{r}
+# summary stats across categorical variables (especially for rented bike count)
+# mean and standard deviation of bikes rented per hour grouped by season
+bike_data |> 
+  group_by(season) |> 
+  summarize(
+    mean_rentals = mean(bike_count),
+    sd_rentals = sd(bike_count)
+  )
+```
+
+The above table gives us the mean and standard deviation of hourly bike rentals in Seoul in 2018, grouped by the season.
+
+```{r}
+# mean and standard deviation of bikes rented per hour grouped by whether is it a holiday or not
+bike_data |> 
+  group_by(holiday) |> 
+  summarize(
+    mean_rentals = mean(bike_count),
+    sd_rentals = sd(bike_count)
+  )
+```
+
+The above table gives us the mean and standard deviation of hourly bike rentals in Seoul in 2018, grouped by whether it is a holiday.
+
+```{r}
+# mean and standard deviation of bikes rented per hour grouped by whether the bike rental place is available (will be mean and sd 0 when non-functional hours)
+bike_data |> 
+  group_by(functioning_day) |> 
+  summarize(
+    mean_rentals = mean(bike_count),
+    sd_rentals = sd(bike_count)
+  )
+```
+
+The above table gives us the mean and standard deviation of hourly bike rentals in Seoul in 2018, grouped by whether it is functioning hours. During non-functioning hours, it makes sense that there are no bike rentals to observe. Because of this, we will subset our data to only include results where functioning_day is "Yes".
+
+```{r}
+# number of observations before subset
+nrow(bike_data)
+
+# subset the data to only include observations where functioning_day is "Yes"
+bike_data <- bike_data |> 
+  filter(functioning_day == "Yes")
+
+# number of observations after subset
+nrow(bike_data)
+```
+
+```{r}
+# # mean and standard deviation of bikes rented per hour grouped by season and whether it is a holiday
+bike_data |> 
+  group_by(season, holiday) |> 
+  summarize(
+    mean_rentals = mean(bike_count),
+    sd_rentals = sd(bike_count)
+  )
+```
+
+The above table gives us the mean and standard deviation of hourly bike rentals in Seoul in 2018, grouped by both the season and whether it is a holiday. 
+
+**Note:** This is now after we have subsetted based on the functioning_day variable
+
+```{r}
+# summarize across days, so there is only one observation for each day
+bike_data <- bike_data |> 
+  group_by(date, season, holiday) |> 
+  summarize(
+    bike_count = sum(bike_count),
+    rainfall = sum(rainfall),
+    snowfall = sum(snowfall),
+    mean_temp = mean(temperature),
+    mean_humidity = mean(humidity),
+    mean_wind_speed = mean(wind_speed),
+    mean_visibility = mean(visibility),
+    mean_dew_point = mean(dew_point_temp),
+    mean_solar_rad = mean(solar_radiation)
+  )
+```
+
+The above code summarizes across days, so bike_data now stores daily bike rental data instead of hourly data. bike_count, rainfall, and snowfall now store the daily totals instead of hourly totals. All the other numeric variables tracking the weather store daily averages.
+
+```{r}
+# recreate above summary stats
+# mean and standard deviation of bikes rented per day grouped by season
+bike_data |> 
+  group_by(season) |> 
+  summarize(
+    mean_rentals = mean(bike_count),
+    sd_rentals = sd(bike_count)
+  )
+```
+
+The above table gives us the mean and standard deviation of daily bike rentals in Seoul in 2018, grouped by the season.
+
+```{r}
+# mean and standard deviation of bikes rented per day grouped by whether is it a holiday or not
+bike_data |> 
+  group_by(holiday) |> 
+  summarize(
+    mean_rentals = mean(bike_count),
+    sd_rentals = sd(bike_count)
+  )
+```
+
+The above table gives us the mean and standard deviation of daily bike rentals in Seoul in 2018, grouped by whether it is a holiday.
+
+```{r}
+# # mean and standard deviation of bikes rented per day grouped by season and whether it is a holiday
+bike_data |> 
+  group_by(season, holiday) |> 
+  summarize(
+    mean_rentals = mean(bike_count),
+    sd_rentals = sd(bike_count)
+  )
+```
+
+The above table gives us the mean and standard deviation of hourly bike rentals in Seoul in 2018, grouped by both the season and whether it is a holiday.
+
+```{r}
+# plot the data to explore relationships
+# plot rented bikes by day, grouped by holiday
+ggplot(data = bike_data, aes(x = date, y = bike_count, colour = holiday)) + 
+  geom_point() + 
+  labs(
+    title = "Daily Bike Rentals in Seoul",
+    subtitle = "Colored by Whether it is a Holiday",
+    x = "Date",
+    y = "Number of Bikes Rented"
+  ) + 
+  scale_color_discrete(name = "Holiday?")
+```
+
+The above scatter plot shows how many bikes were rented per day in Seoul in 2018, with the points colored by whether the day was a holiday.
+
+```{r}
+# plot rented bikes by rainfall, grouped by season
+ggplot(data = bike_data, aes(x = rainfall, y = bike_count, colour = season)) + 
+  geom_point() + 
+  labs(
+    title = "Daily Bike Rentals in Seoul",
+    subtitle = "Colored by Season",
+    x = "Rainfall (mm)",
+    y = "Number of Bikes Rented"
+  ) + 
+  scale_color_discrete(name = "Season:")
+```
+
+The above scatter plot shows how many bikes were rented in day based on the total rainfall that day. The points are colored by the season of the day. It makes sense that many of the points are at 0 on the x-axis, as many days have no rain at all.
+
+```{r}
+# plot rented bikes by snowfall, grouped by season
+ggplot(data = bike_data, aes(x = snowfall, y = bike_count, colour = season)) + 
+  geom_point() + 
+  labs(
+    title = "Daily Bike Rentals in Seoul",
+    subtitle = "Colored by Season",
+    x = "Snowfall (cm)",
+    y = "Number of Bikes Rented"
+  ) + 
+  scale_color_discrete(name = "Season:")
+```
+
+The above scatter plot shows how many bikes were rented in day based on the total snowfall that day. The points are colored by the season of the day. It makes sense that many of the points are at 0 on the x-axis, as many days have no snow at all. All of the points not at 0 on the x-axis are in the Autumn or Winter, with the majority in the Winter, which makes sense as these are the coldest months in the Northern Hemisphere.
+
+```{r}
+# plot rented bikes by humidity, grouped by season
+ggplot(data = bike_data, aes(x = mean_humidity, y = bike_count, colour = season)) + 
+  geom_point() + 
+  labs(
+    title = "Daily Bike Rentals in Seoul",
+    subtitle = "Colored by Season",
+    x = "Average Humidity for the Day (%)",
+    y = "Number of Bikes Rented"
+  ) + 
+  scale_color_discrete(name = "Season:")
+```
+
+The above scatter plot shows how many bikes were rented in day based on the average humidity that day. The points are colored by the season of the day. 
+
+```{r}
+# plot rented bikes by temperature, grouped by season
+ggplot(data = bike_data, aes(x = mean_temp, y = bike_count, colour = season)) + 
+  geom_point() + 
+  labs(
+    title = "Daily Bike Rentals in Seoul",
+    subtitle = "Colored by Season",
+    x = "Average Temperature for the Day (°C)",
+    y = "Number of Bikes Rented"
+  ) + 
+  scale_color_discrete(name = "Season:")
+```
+
+The above scatter plot shows how many bikes were rented in day based on the average temperature that day. The points are colored by the season of the day. It appears the there is a positive correlation between temperature and daily bike rentals, possibly because people are more likely to want to do outdoor activities like ride a bike when it is warmer outside. However, there may be some non-linear effect, where when the temperature gets too high, the number of bike rentals goes down, as people feel it is too hot.
+
+```{r}
+# plot rented bikes by solar radiation, grouped by season
+ggplot(data = bike_data, aes(x = mean_solar_rad, y = bike_count, colour = season)) + 
+  geom_point() + 
+  labs(
+    title = "Daily Bike Rentals in Seoul",
+    subtitle = "Colored by Season",
+    x = "Average Solar Radiation for the Day (MJ/m2)",
+    y = "Number of Bikes Rented"
+  ) + 
+  scale_color_discrete(name = "Season:")
+```
+
+The above scatter plot shows how many bikes were rented in day based on the average solar radiation that day. The points are colored by the season of the day. It appears the there is a positive correlation between solar radiation and daily bike rentals, possibly because people are more likely to want to do outdoor activities like ride a bike when it is sunny outside.
+
+```{r}
+# plot rented bikes by visibility, grouped by season
+ggplot(data = bike_data, aes(x = mean_visibility, y = bike_count, colour = season)) + 
+  geom_point() + 
+  labs(
+    title = "Daily Bike Rentals in Seoul",
+    subtitle = "Colored by Season",
+    x = "Average Visibility for the Day (10m)",
+    y = "Number of Bikes Rented"
+  ) + 
+  scale_color_discrete(name = "Season:")
+```
+
+The above scatter plot shows how many bikes were rented in day based on the average visibility that day. The points are colored by the season of the day. 
+
+```{r}
+# report correlations for all the numeric variables in the data
+cor(bike_data |> 
+      ungroup() |> 
+      select(where(is.numeric)), 
+    method = "pearson")
+```
+
+The above table is a correlation matrix of all the numeric variables in our data set. The most important row and column concerning bike rentals is the first row and first column (which give the same information). This row/column tells us the direction and strength of the linear relationships between daily bike rentals in Seoul and the other numeric variables in our relationship. Positive numbers indicate a positive relationship, while negative numbers indicate a negative, or inverse, relationship. The closer to 1 or -1, the stronger the linear relationship is. The closer to 0, the weaker the linear relationship is.
+
+## Split the Data
+```{r}
+# set seed so the results are replicable
+set.seed(2824)
+
+# split the data into a 75/25 training/test split, stratify the split by seasons
+bike_split <- initial_split(bike_data, prop = 0.75, strata = season)
+
+# save the 75% split as training
+bike_train <- training(bike_split)
+
+# save the 25% split as testing
+bike_test <- testing(bike_split)
+
+# view the training and testing sets
+bike_train
+bike_test
+```
+
+Above, we can see the heads of our training and test data sets. Using the tidymodels package, we split 75% of our bike rental data into the training set, which we will use to train our models, and the remaining 25% of the data makes up the test set, which will be used to test how effective our models are. The split was stratified by the season variable, so each data set will include a proportional number of observations from each season. Our training data set has 263 observations, while our test data set has 90
+
+```{r}
+# want to create a 10 fold CV split on our training data
+# create a function to do so (same as in notes from github pages)
+get_cv_splits <- function(data, num_folds){
+  #get fold size
+  size_fold <- floor(nrow(data)/num_folds)
+  #get random indices to subset the data with
+  random_indices <- sample(1:nrow(data), size = nrow(data), replace = FALSE)
+  #create a list to save our folds in
+  folds <- list()
+  #now cycle through our random indices vector and take the appropriate observations to each fold
+  for(i in 1:num_folds){
+    if (i < num_folds) {
+      fold_index <- seq(from = (i-1)*size_fold +1, to = i*size_fold, by = 1)
+      folds[[i]] <- data[random_indices[fold_index], ]
+    } else {
+      fold_index <- seq(from = (i-1)*size_fold +1, to = length(random_indices), by = 1)
+      folds[[i]] <- data[random_indices[fold_index], ]
+    }
+  }
+  return(folds)
+}
+
+# save the results in folds
+folds <- get_cv_splits(bike_train, 10)
+
+# view the 10 fold CV
+folds
+```
+
+In the above code, we created a function that allows us to do cross validation on a data set with a certain number of folds. We then used this to do 10 fold cross validation on the training set from our bike rental data, with the heads of each fold returned above. Each fold contains 26 observations, except the tenth fold, which contains 29.
+
+
+## Fitting MLR Models
+
+### Recipe 1:
+```{r}
+# create some recipes with tidymodels
+# first recipe: 
+bike_recipe_1 <- recipe(bike_count ~ . , data = bike_train) |> 
+  #obtain day of week from data variable
+  step_date(date, features = "dow", keep_original_cols = FALSE) |> 
+  # mutate to create factor examining if it is a weekday or weekend
+  step_mutate(day_type = factor(ifelse(date_dow %in% c("Sat", "Sun"), "Weekend", "Weekday"))) |> 
+  # remove the day of week variable
+  step_rm(date_dow) |> 
+  # normalize all numeric variables
+  step_normalize(all_numeric()) |> 
+  # create dummy variables for factors
+  step_dummy(season, holiday, day_type)
+
+# view results
+bike_recipe_1 |> 
+  prep(training = bike_train) |> 
+  bake(bike_train)
+
+# names of variables in recipe 1
+bike_recipe_1  |> 
+  prep(training = bike_train) |> 
+  bake(bike_train) |> 
+  names()
+```
+
+Our first recipe with tidymodels has us create a day_type factor variable, created by pulling the day of the week from the date variable using step_date(), and then using step_mutate() to create the day_type variable. All of our numeric variables are standardized, including the outcome variable, bike_count.
+
+### Recipe 2:
+```{r}
+# second recipe: 
+bike_recipe_2 <- recipe(bike_count ~ . , data = bike_train) |> 
+  #obtain day of week from data variable
+  step_date(date, features = "dow", keep_original_cols = FALSE) |> 
+  # mutate to create factor examining if it is a weekday or weekend
+  step_mutate(day_type = factor(ifelse(date_dow %in% c("Sat", "Sun"), "Weekend", "Weekday"))) |> 
+  # remove the day of week variable
+  step_rm(date_dow) |> 
+  # normalize all numeric variables
+  step_normalize(all_numeric()) |> 
+  # create dummy variables for factors
+  step_dummy(season, holiday, day_type) |> 
+  # add in interacts between seasons and holiday, seasons and temp, and temp and rainfall
+  step_interact(terms = ~ starts_with("season")*holiday_No.Holiday + 
+                  starts_with("season")*mean_temp + 
+                  mean_temp*rainfall)
+
+# view results
+bike_recipe_2 |> 
+  prep(training = bike_train) |> 
+  bake(bike_train)
+
+# names of variables in recipe 2
+bike_recipe_2  |> 
+  prep(training = bike_train) |> 
+  bake(bike_train) |> 
+  names()
+```
+
+Our second recipe is the same as the first, except it adds interaction terms! We have now added interaction terms for the interaction between the season dummy variables and the holiday dumm variable, the season dummy variables and temperature, and temperature and rainfall.
+
+### Recipe 3:
+```{r}
+# third recipe: 
+bike_recipe_3 <- recipe(bike_count ~ . , data = bike_train) |> 
+  #obtain day of week from data variable
+  step_date(date, features = "dow", keep_original_cols = FALSE) |> 
+  # mutate to create factor examining if it is a weekday or weekend
+  step_mutate(day_type = factor(ifelse(date_dow %in% c("Sat", "Sun"), "Weekend", "Weekday"))) |> 
+  # remove the day of week variable
+  step_rm(date_dow) |> 
+  # normalize all numeric variables
+  step_normalize(all_numeric()) |> 
+  # create dummy variables for factors
+  step_dummy(season, holiday, day_type) |> 
+  # add in quadratic terms for numeric predictors
+  step_poly(rainfall, snowfall, mean_temp, mean_humidity, mean_wind_speed, mean_dew_point, mean_solar_rad, mean_visibility) |> 
+    # add in interactions between seasons and holiday, seasons and temp, and temp and rainfall
+  step_interact(terms = ~ starts_with("season")*holiday_No.Holiday + 
+                  starts_with("season")*mean_temp_poly_1 + 
+                  mean_temp_poly_1*rainfall_poly_1)
+
+# view results
+bike_recipe_3 |> 
+  prep(training = bike_train) |> 
+  bake(bike_train)
+
+# names of variables in recipe 3
+bike_recipe_3  |> 
+  prep(training = bike_train) |> 
+  bake(bike_train) |> 
+  names()
+```
+
+Our third and final recipe is similar to our second one, except now we have added quadratic terms for our numeric predictors variables.
+
+
+### Fit and Compare the Models
+```{r}
+# set the engine for our models to be "lm"
+bike_mod <- linear_reg() |> 
+  set_engine("lm")
+
+# create a workflow that adds our recipe and our model with corresponding function
+bike_workflow_1 <- workflow() |>
+ add_recipe(bike_recipe_1) |>
+ add_model(bike_mod)
+bike_workflow_1
+
+bike_workflow_2 <- workflow() |>
+ add_recipe(bike_recipe_2) |>
+ add_model(bike_mod)
+bike_workflow_2
+
+bike_workflow_3 <- workflow() |>
+ add_recipe(bike_recipe_3) |>
+ add_model(bike_mod)
+bike_workflow_3
+
+# use a 10 fold CV in the training set
+bike_10_fold <- vfold_cv(bike_train, 10)
+
+# get the metrics for the 10 CV fit on recipe 1
+bike_CV_fits_1 <- bike_workflow_1 |>
+ fit_resamples(bike_10_fold)
+
+# get the metrics for the 10 CV fit on recipe 2
+bike_CV_fits_2 <- bike_workflow_2 |>
+ fit_resamples(bike_10_fold)
+
+# get the metrics for the 10 CV fit on recipe 3
+bike_CV_fits_3 <- bike_workflow_3 |>
+ fit_resamples(bike_10_fold)
+
+# view the metrics from the three models
+rbind(bike_CV_fits_1 |> collect_metrics(), 
+      bike_CV_fits_2 |> collect_metrics(), 
+      bike_CV_fits_3 |> collect_metrics())
+```
+
+Based on the root mean squared error (RMSE) of the training set, the best recipe of the three candidates is recipe 3, with a RMSE = 0.310. The next best is recipe 2, with a RMSE = 0.321. And in third is recipe 1, with a RMSE = 0.412.
+
+Since recipe 3 produced our 'best' model, we will test it with our test set.
+
+```{r}
+# fit the model from recipe 3
+bike_fit <- bike_workflow_3 |>
+ fit(bike_train)
+
+# see how the model performs on the test data
+bike_workflow_3 |>
+ last_fit(bike_split) |>
+ collect_metrics()
+
+# view the final model coefficient table
+bike_fit |> 
+  extract_fit_parsnip() |> 
+ tidy()
+```
+
+It appears our model does quite well on the test set, with a RMSE = 0.296, even lower than the training set.
+
+The final model's coefficient table is the last table output. It includes the parameter estimate, standard error, test statistic, and p-value of every parameter in the model.
+
+## LASSO Model
+```{r}
+
+```
