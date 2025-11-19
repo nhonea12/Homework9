@@ -14,6 +14,8 @@ The following is a continuation of what we were working on in homework 8. We are
 library(tidyverse)
 #install.packages("tidymodels")
 library(tidymodels)
+#install.packages("glmnet")
+library(glmnet)
 
 # read in the Seoul Bike Data
 bike_data <- read_csv("SeoulBikeData.csv", locale=locale(encoding="latin1"))
@@ -601,5 +603,65 @@ The final model's coefficient table is the last table output. It includes the pa
 
 ## LASSO Model
 ```{r}
+# specify the LASSO model
+LASSO_spec <- linear_reg(penalty = tune(), mixture = 1) |>
+  set_engine("glmnet")
 
+# create the workflow for our LASSO model
+LASSO_wkf <- workflow() |>
+  add_recipe(bike_recipe_1) |>
+  add_model(LASSO_spec)
+
+LASSO_wkf
+
+# fit the model with tune_grid() and grid_regular()
+# a warning will occur for one value of the tuning parameter, safe to ignore
+LASSO_grid <- LASSO_wkf |>
+  tune_grid(resamples = bike_10_fold,
+            grid = grid_regular(penalty(), levels = 200)) 
+
+# view what LASSO_grid gives us
+LASSO_grid
+
+# view the rmse and rsq of each of our 200 fit LASSO models 
+LASSO_grid[1, ".metrics"][[1]]
+
+# only look at RMSE
+LASSO_grid |>
+  collect_metrics() |>
+  filter(.metric == "rmse")
+
+# pick the LASSO model with the best RMSE
+lowest_rmse_LASSO <- LASSO_grid |>
+  select_best(metric = "rmse")
+
+lowest_rmse_LASSO
+
+#fit it to the entire training set to see the model fit
+LASSO_final <- LASSO_wkf |>
+  finalize_workflow(lowest_rmse_LASSO) |>
+  fit(bike_train)
+
+# view the coefficient and tuning parameter estimates of the final LASSO model
+tidy(LASSO_final)
+```
+
+The above code is used to fit a LASSO model to our data, with recipe 1 (no interactions or quadratic terms) from earlier being used in our workflow. 200 different models are then fit in `LASSO_grid` with our 10 fold CV folds from earlier, and the one with the lowest RMSE is fit to our training data.
+
+## Regression Tree
+
+```{r}
+# define our regression tree's model and engine
+reg_tree_mod <- decision_tree(tree_depth = tune(),
+                          min_n = 20,
+                          cost_complexity = tune()) |>
+  set_engine("rpart") |>
+  set_mode("regression")
+
+# create the workflow for our regression tree
+reg_tree_wkf <- workflow() |>
+  add_recipe(bike_recipe_1) |>
+  add_model(reg_tree_mod)
+
+reg_tree_wkf
 ```
