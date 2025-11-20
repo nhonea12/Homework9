@@ -18,6 +18,12 @@ library(tidymodels)
 library(glmnet)
 #install.packages("dials")
 library(dials)
+library(rpart)
+#install.packages("baguette")
+library(baguette)
+#install.packages("ranger")
+library(ranger)
+
 
 # read in the Seoul Bike Data
 bike_data <- read_csv("SeoulBikeData.csv", locale=locale(encoding="latin1"))
@@ -697,4 +703,96 @@ reg_tree_final_fit <- reg_tree_final_wkf |>
 reg_tree_final_fit
 ```
 
-The above code fits a regreesion tree model to our data, once again using recipe 1. Similar to our LASSO model, this process involves creating a workflow, tuning our regression tree with 10 fold CV, find our best tree in terms of RMSE, updating our workflow, and finally fitting our best model to the training data.
+The above code fits a regression tree model to our data, once again using recipe 1. Similar to our LASSO model, this process involves creating a workflow, tuning our regression tree with 10 fold CV, find our best tree in terms of RMSE, updating our workflow, and finally fitting our best model to the training data.
+
+## Bagged Tree Model
+```{r}
+# set up our model type and engine for our bagged tree model, tune on cost complexity
+bag_spec <- bag_tree(tree_depth = 5, min_n = 10, cost_complexity = tune()) |>
+ set_engine("rpart") |>
+ set_mode("regression")
+
+# create a workflow for the bagged tree (uses baguette library)
+bag_wkf <- workflow() |>
+ add_recipe(bike_recipe_1) |>
+ add_model(bag_spec)
+
+# fit our bagged tree models
+bag_fit <- bag_wkf |>
+  tune_grid(
+    resamples = bike_10_fold,
+    grid = grid_regular(cost_complexity(),
+    levels = 15),
+    metrics = metric_set(rmse, rsq)
+    )
+
+bag_fit
+
+# sort the fitted bagged trees by their RMSE
+bag_fit |>
+ collect_metrics() |>
+ filter(.metric == "rmse") |>
+ arrange(mean)
+
+# get our bagged tree model with the best tuning parameter
+bag_best_params <- select_best(bag_fit, metric = "rmse")
+
+bag_best_params
+
+# update the workflow and fit our best bagged tree model on the training set
+bag_final_wkf <- bag_wkf |>
+ finalize_workflow(bag_best_params)
+
+bag_final_fit <- bag_final_wkf |>
+ last_fit(bike_split, metrics = metric_set(rmse))
+```
+
+The above code creates our bagged tree model. This model uses bootstrap sampling to sample from our training data with replacement, and estimate trees from these samples. The steps to create our bagged tree models and select the best performing one (in terms of RMSE) are similar to the steps for the LASSO and regression tree models.
+
+## Random Forest Model
+```{r}
+# set up our model type and engine for our random forest model, tune on number of parameters to split on
+rf_spec <- rand_forest(mtry = tune()) |>
+  set_engine("ranger") |>
+  set_mode("regression")
+
+# create the workflow for our random forest model
+rf_wkf <- workflow() |>
+  add_recipe(bike_recipe_1) |>
+  add_model(rf_spec)
+
+# fit our random forest models
+rf_fit <- rf_wkf |>
+  tune_grid(
+    resamples = bike_10_fold,
+    grid = 7,
+    metrics = metric_set(rmse, rsq)
+    )
+
+# view which of our random forest models work best based on RMSE
+rf_fit |>
+  collect_metrics() |>
+  filter(.metric == "rmse") |>
+  arrange(mean)
+
+# save our best tuning paramters
+rf_best_params <- select_best(rf_fit, metric = "rmse")
+rf_best_params
+
+# update the workflow and fit our best random forest model on the training set
+rf_final_wkf <- rf_wkf |>
+ finalize_workflow(rf_best_params)
+
+rf_final_fit <- rf_final_wkf |>
+ last_fit(bike_split, metrics = metric_set(rmse))
+```
+
+The above code chunk creates our random forest model. The random forest model is similar to the bagged tree model, except it doesn't consider all predictors at each step, as the number of parameters in the subset to split from is used as the tuning parameter.
+
+## Compare All Final Models
+
+All of the final models above, including the best MLR model, will be compared to see how they perform on the test set, with RMSE and MAE being the metrics considered. The best overall model will be fit to the entire data.
+
+```{r}
+
+```
