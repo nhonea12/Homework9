@@ -16,6 +16,8 @@ library(tidyverse)
 library(tidymodels)
 #install.packages("glmnet")
 library(glmnet)
+#install.packages("dials")
+library(dials)
 
 # read in the Seoul Bike Data
 bike_data <- read_csv("SeoulBikeData.csv", locale=locale(encoding="latin1"))
@@ -664,4 +666,35 @@ reg_tree_wkf <- workflow() |>
   add_model(reg_tree_mod)
 
 reg_tree_wkf
+
+# tune our regression tree with 10 fold CV (using default levels)
+reg_tree_fits <- reg_tree_wkf |> 
+  tune_grid(resamples = bike_10_fold)
+
+# view the metrics of our tree with different tunings
+reg_tree_fits |> 
+  collect_metrics()
+
+# sort the trees by how they perform in terms of RMSE
+reg_tree_fits |>
+  collect_metrics() |>
+  filter(.metric == "rmse") |>
+  arrange(mean)
+
+# select the best tree in terms of RMSE
+reg_tree_best_params <- select_best(reg_tree_fits, metric = "rmse")
+
+# view the best tree's parameters
+reg_tree_best_params
+
+# finalize our workflow and fit our best regression tree to the training data
+reg_tree_final_wkf <- reg_tree_wkf |>
+  finalize_workflow(reg_tree_best_params)
+
+reg_tree_final_fit <- reg_tree_final_wkf |>
+  last_fit(bike_split)
+
+reg_tree_final_fit
 ```
+
+The above code fits a regreesion tree model to our data, once again using recipe 1. Similar to our LASSO model, this process involves creating a workflow, tuning our regression tree with 10 fold CV, find our best tree in terms of RMSE, updating our workflow, and finally fitting our best model to the training data.
