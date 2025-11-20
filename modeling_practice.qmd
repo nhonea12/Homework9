@@ -626,12 +626,13 @@ LASSO_wkf
 # a warning will occur for one value of the tuning parameter, safe to ignore
 LASSO_grid <- LASSO_wkf |>
   tune_grid(resamples = bike_10_fold,
-            grid = grid_regular(penalty(), levels = 200)) 
+            grid = grid_regular(penalty(), levels = 200),
+            metrics = metric_set(rmse, mae)) 
 
 # view what LASSO_grid gives us
 LASSO_grid
 
-# view the rmse and rsq of each of our 200 fit LASSO models 
+# view the rmse and mae of each of our 200 fit LASSO models 
 LASSO_grid[1, ".metrics"][[1]]
 
 # only look at RMSE
@@ -646,12 +647,11 @@ lowest_rmse_LASSO <- LASSO_grid |>
 lowest_rmse_LASSO
 
 #fit it to the entire training set to see the model fit
-LASSO_final <- LASSO_wkf |>
-  finalize_workflow(lowest_rmse_LASSO) |>
-  fit(bike_train)
+LASSO_final_wkf <- LASSO_wkf |>
+  finalize_workflow(lowest_rmse_LASSO) 
 
-# view the coefficient and tuning parameter estimates of the final LASSO model
-tidy(LASSO_final)
+LASSO_final <- LASSO_final_wkf |>
+  last_fit(bike_split, metrics = metric_set(rmse, mae))
 ```
 
 The above code is used to fit a LASSO model to our data, with recipe 1 (no interactions or quadratic terms) from earlier being used in our workflow. 200 different models are then fit in `LASSO_grid` with our 10 fold CV folds from earlier, and the one with the lowest RMSE is fit to our training data.
@@ -675,7 +675,8 @@ reg_tree_wkf
 
 # tune our regression tree with 10 fold CV (using default levels)
 reg_tree_fits <- reg_tree_wkf |> 
-  tune_grid(resamples = bike_10_fold)
+  tune_grid(resamples = bike_10_fold,
+            metrics = metric_set(rmse, mae))
 
 # view the metrics of our tree with different tunings
 reg_tree_fits |> 
@@ -698,7 +699,7 @@ reg_tree_final_wkf <- reg_tree_wkf |>
   finalize_workflow(reg_tree_best_params)
 
 reg_tree_final_fit <- reg_tree_final_wkf |>
-  last_fit(bike_split)
+  last_fit(bike_split, metrics = metric_set(rmse, mae))
 
 reg_tree_final_fit
 ```
@@ -723,7 +724,7 @@ bag_fit <- bag_wkf |>
     resamples = bike_10_fold,
     grid = grid_regular(cost_complexity(),
     levels = 15),
-    metrics = metric_set(rmse, rsq)
+    metrics = metric_set(rmse, mae)
     )
 
 bag_fit
@@ -744,7 +745,7 @@ bag_final_wkf <- bag_wkf |>
  finalize_workflow(bag_best_params)
 
 bag_final_fit <- bag_final_wkf |>
- last_fit(bike_split, metrics = metric_set(rmse))
+ last_fit(bike_split, metrics = metric_set(rmse, mae))
 ```
 
 The above code creates our bagged tree model. This model uses bootstrap sampling to sample from our training data with replacement, and estimate trees from these samples. The steps to create our bagged tree models and select the best performing one (in terms of RMSE) are similar to the steps for the LASSO and regression tree models.
@@ -766,7 +767,7 @@ rf_fit <- rf_wkf |>
   tune_grid(
     resamples = bike_10_fold,
     grid = 7,
-    metrics = metric_set(rmse, rsq)
+    metrics = metric_set(rmse, mae)
     )
 
 # view which of our random forest models work best based on RMSE
@@ -784,7 +785,7 @@ rf_final_wkf <- rf_wkf |>
  finalize_workflow(rf_best_params)
 
 rf_final_fit <- rf_final_wkf |>
- last_fit(bike_split, metrics = metric_set(rmse))
+ last_fit(bike_split, metrics = metric_set(rmse, mae))
 ```
 
 The above code chunk creates our random forest model. The random forest model is similar to the bagged tree model, except it doesn't consider all predictors at each step, as the number of parameters in the subset to split from is used as the tuning parameter.
@@ -793,6 +794,66 @@ The above code chunk creates our random forest model. The random forest model is
 
 All of the final models above, including the best MLR model, will be compared to see how they perform on the test set, with RMSE and MAE being the metrics considered. The best overall model will be fit to the entire data.
 
+```{r}
+set.seed(2824)
+# compare metrics of each of the final models above
+rbind(
+  # MLR
+  bike_workflow_3 |>
+ last_fit(bike_split, metrics = metric_set(rmse, mae)) |>
+ collect_metrics() |>
+    mutate(Model = "MLR", .before = ".metric"),
+ # LASSO
+ LASSO_final |> 
+   collect_metrics() |> 
+    mutate(Model = "LASSO", .before = ".metric"),
+ # regression tree
+ reg_tree_final_fit |> 
+   collect_metrics() |> 
+   mutate(Model = "REG TREE", .before = ".metric"),
+ # bagged tree
+ bag_final_fit |> 
+   collect_metrics() |> 
+   mutate(Model = "BAG TREE", .before = ".metric"),
+ # random forest
+ rf_final_fit |> 
+   collect_metrics() |> 
+   mutate(Model = "RAND FOR", .before = ".metric")
+)
+```
+
+Based on the RMSE and MAE values for how our best models of each type performed on the test set, the **multiple linear regression (MLR) model** is the best model in this case, with an RMSE = 0.296 and a MAE = 0.226. The random forest model also appears to have similar levels for these metrics.
+
+## Model Fits and Summaries
+
+### Multiple Linear Regression Model Summary
+```{r}
+
+```
+
+### LASSO Model Summary
+```{r}
+
+```
+
+### Regression Tree Model Summary
+```{r}
+
+```
+
+### Bagged Tree Model Summary
+```{r}
+
+```
+
+### Random Forest Model Summary
+```{r}
+
+```
+
+Since our random forest model was our best model, we will fit that one to our entire dataset.
+
+## Fit Best Model to Overall Dataset
 ```{r}
 
 ```
