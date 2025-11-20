@@ -23,7 +23,12 @@ library(rpart)
 library(baguette)
 #install.packages("ranger")
 library(ranger)
+#install.packages("rpart.plot")
+library(rpart.plot)
+#install.packages("vip")
+library(vip)
 
+set.seed(2824)
 
 # read in the Seoul Bike Data
 bike_data <- read_csv("SeoulBikeData.csv", locale=locale(encoding="latin1"))
@@ -646,7 +651,7 @@ lowest_rmse_LASSO <- LASSO_grid |>
 
 lowest_rmse_LASSO
 
-#fit it to the entire training set to see the model fit
+# finalize workflow with the best model and fit it to the training set
 LASSO_final_wkf <- LASSO_wkf |>
   finalize_workflow(lowest_rmse_LASSO) 
 
@@ -827,33 +832,115 @@ Based on the RMSE and MAE values for how our best models of each type performed 
 ## Model Fits and Summaries
 
 ### Multiple Linear Regression Model Summary
-```{r}
 
+Below is a table of coefficients from our MLR model.
+
+```{r}
+# view the final model coefficient table
+bike_fit |> 
+  extract_fit_parsnip() |> 
+ tidy()
 ```
 
 ### LASSO Model Summary
-```{r}
 
+Below is a table of coefficients from our LASSO model.
+
+```{r}
+#fit it to the entire training set to see the model fit
+LASSO_final_coefs <- LASSO_wkf |>
+  finalize_workflow(lowest_rmse_LASSO) |>
+  fit(bike_train)
+
+tidy(LASSO_final_coefs)
 ```
 
 ### Regression Tree Model Summary
-```{r}
 
+Below is a plot of the regression tree model.
+
+```{r}
+reg_tree_final_fit |>
+  extract_fit_engine() |>
+  rpart.plot(roundint = FALSE)
 ```
 
 ### Bagged Tree Model Summary
-```{r}
 
+Below is a variable importance plot for the bagged tree model. 
+```{r}
+# get the fit on the full data
+bag_full_fit <- bag_final_wkf |>
+ fit(bike_data)
+
+bag_final_model <- extract_fit_engine(bag_full_fit)
+
+# plot of the variable importance
+bag_final_model$imp |>
+ mutate(term = factor(term, levels = term)) |>
+ ggplot(aes(x = term, y = value)) +
+ geom_bar(stat ="identity") +
+ coord_flip() + 
+  labs(
+    title = "Variable Importance Plot for Final Bagged Tree Model",
+    subtitle = "Used for Bike Rental Data",
+    x = "Importance",
+    y = "Predictor Variable"
+  )
 ```
 
 ### Random Forest Model Summary
+
+Below is a variable importance plot for the random forest model. 
+
 ```{r}
+# function to get the importance of each variable
+get_rf_imp <- function(x) {
+    x %>% 
+        extract_fit_parsnip() %>% 
+        vip::vi()
+}
 
+rf_spec_imp <- rand_forest(mode = "regression") %>%
+    set_engine("ranger", importance = "impurity")
+
+ctrl_imp <- control_grid(extract = get_rf_imp)
+
+cells_res <-
+    workflow(bike_count ~ ., rf_spec_imp) %>%
+    fit_resamples(bike_10_fold, control = ctrl_imp)
+
+cells_res
+
+cells_res %>%
+    select(id, .extracts) %>%
+    unnest(.extracts) %>%
+    unnest(.extracts) %>%
+    group_by(Variable) %>%
+    summarise(Mean = mean(Importance),
+              Variance = sd(Importance)) %>%
+    slice_max(Mean, n = 15) %>%
+    ggplot(aes(Mean, reorder(Variable, Mean))) +
+    geom_crossbar(aes(xmin = Mean - Variance, xmax = Mean + Variance)) +
+    labs(
+      title = "Variable Importance Plot for Final Random Forest Model",
+      subtitle = "Used for Bike Rental Data",
+      x = "Importance",
+      y = "Predictor Variable"
+    )
 ```
-
-Since our random forest model was our best model, we will fit that one to our entire dataset.
 
 ## Fit Best Model to Overall Dataset
-```{r}
 
+Since our MLR model was our best model, we will fit that one to our entire dataset.
+
+```{r}
+# fit our MLR model to the entire data set
+final_model <- bike_workflow_3 |> 
+  fit(bike_data)
+  
+# view our entire final model
+tidy(final_model) |> print(n = 29)
 ```
+
+The above is the parameter estimates from our best overall model when fit to our entire data set.
